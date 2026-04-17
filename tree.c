@@ -15,6 +15,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include "index.h"
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -129,50 +130,39 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
-int tree_from_index(Index *idx, ObjectID *out_tree) {
-    TreeEntry entries[1024];
-    size_t count = 0;
+int tree_from_index(ObjectID *out_tree) {
+    Index idx;
+    if (index_load(&idx) != 0) return -1;
 
-    for (size_t i = 0; i < idx->count; i++) {
-        IndexEntry *ie = &idx->entries[i];
+    Tree tree;
+    tree.count = 0;
 
-        TreeEntry *te = &entries[count++];
+    // Step 1: Fill tree entries
+    for (int i = 0; i < idx.count; i++) {
+        IndexEntry *ie = &idx.entries[i];
+
+        TreeEntry *te = &tree.entries[tree.count++];
 
         te->mode = ie->mode;
-        memcpy(&te->id, &ie->id, sizeof(ObjectID));
 
-        // Only filename (strip directory)
+        memcpy(&te->hash, &ie->hash, sizeof(ObjectID));
+
+        // strip directory (only filename)
         char *slash = strrchr(ie->path, '/');
         if (slash) strcpy(te->name, slash + 1);
         else strcpy(te->name, ie->path);
     }
 
-    // Calculate size
-    size_t total_size = 0;
-    for (size_t i = 0; i < count; i++) {
-        total_size += snprintf(NULL, 0, "%o %s", entries[i].mode, entries[i].name) + 1;
-        total_size += HASH_SIZE;
-    }
+    // Step 2: Serialize tree
+    void *data;
+    size_t len;
 
-    char *buffer = malloc(total_size);
-    if (!buffer) return -1;
+    if (tree_serialize(&tree, &data, &len) != 0)
+        return -1;
 
-    char *ptr = buffer;
+    // Step 3: Write object
+    int res = object_write(OBJ_TREE, data, len, out_tree);
 
-    // Serialize
-    for (size_t i = 0; i < count; i++) {
-        int len = sprintf(ptr, "%o %s", entries[i].mode, entries[i].name);
-        ptr += len;
-
-        *ptr++ = '\0';
-
-        memcpy(ptr, entries[i].id.hash, HASH_SIZE);
-        ptr += HASH_SIZE;
-    }
-
-    // FINAL STEP
-    int res = object_write(OBJ_TREE, buffer, total_size, out_tree);
-
-    free(buffer);
+    free(data);
     return res;
 }

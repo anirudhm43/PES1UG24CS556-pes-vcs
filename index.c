@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include "pes.h"
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
@@ -60,8 +61,7 @@ int index_remove(Index *index, const char *path) {
 int index_status(const Index *index) {
     printf("Staged changes:\n");
     int staged_count = 0;
-    // Note: A true Git implementation deeply diffs against the HEAD tree here. 
-    // For this lab, displaying indexed files represents the staging intent.
+
     for (int i = 0; i < index->count; i++) {
         printf("  staged:     %s\n", index->entries[i].path);
         staged_count++;
@@ -71,60 +71,63 @@ int index_status(const Index *index) {
 
     printf("Unstaged changes:\n");
     int unstaged_count = 0;
+
     for (int i = 0; i < index->count; i++) {
         struct stat st;
+
         if (stat(index->entries[i].path, &st) != 0) {
             printf("  deleted:    %s\n", index->entries[i].path);
             unstaged_count++;
         } else {
-            // Fast diff: check metadata instead of re-hashing file content
-            if (st.st_mtime != (time_t)index->entries[i].mtime_sec || st.st_size != (off_t)index->entries[i].size) {
+            
+            if (st.st_size != index->entries[i].size) {
                 printf("  modified:   %s\n", index->entries[i].path);
                 unstaged_count++;
             }
         }
     }
+
     if (unstaged_count == 0) printf("  (nothing to show)\n");
     printf("\n");
 
     printf("Untracked files:\n");
     int untracked_count = 0;
+
     DIR *dir = opendir(".");
     if (dir) {
         struct dirent *ent;
+
         while ((ent = readdir(dir)) != NULL) {
-            // Skip hidden directories, parent directories, and build artifacts
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
             if (strcmp(ent->d_name, ".pes") == 0) continue;
-            if (strcmp(ent->d_name, "pes") == 0) continue; // compiled executable
-            if (strstr(ent->d_name, ".o") != NULL) continue; // object files
+            if (strcmp(ent->d_name, "pes") == 0) continue;
+            if (strstr(ent->d_name, ".o") != NULL) continue;
 
-            // Check if file is tracked in the index
             int is_tracked = 0;
             for (int i = 0; i < index->count; i++) {
                 if (strcmp(index->entries[i].path, ent->d_name) == 0) {
-                    is_tracked = 1; 
+                    is_tracked = 1;
                     break;
                 }
             }
-            
+
             if (!is_tracked) {
                 struct stat st;
-                stat(ent->d_name, &st);
-                if (S_ISREG(st.st_mode)) { // Only list regular files for simplicity
+                if (stat(ent->d_name, &st) == 0 && S_ISREG(st.st_mode)) {
                     printf("  untracked:  %s\n", ent->d_name);
                     untracked_count++;
                 }
             }
         }
+
         closedir(dir);
     }
+
     if (untracked_count == 0) printf("  (nothing to show)\n");
     printf("\n");
 
     return 0;
 }
-
 // ─── TODO: Implement these ───────────────────────────────────────────────────
 
 // Load the index from .pes/index.
@@ -138,10 +141,7 @@ int index_load(Index *idx) {
     idx->count = 0;
 
     FILE *f = fopen(".pes/index", "r");
-    if (!f) {
-        // File doesn't exist → empty index
-        return 0;
-    }
+    if (!f) return 0;
 
     char line[1024];
 
@@ -150,17 +150,16 @@ int index_load(Index *idx) {
 
         char hash_hex[HASH_HEX_SIZE + 1];
 
-        if (sscanf(line, "%o %s %ld %zu %[^\n]",
+        if (sscanf(line, "%o %s %u %[^\n]",
                    &entry->mode,
                    hash_hex,
-                   &entry->mtime,
                    &entry->size,
-                   entry->path) != 5) {
-            continue; // skip malformed lines
+                   entry->path) != 4) {
+            continue;
         }
 
-        // Convert hex → binary hash
-        hex_to_hash(hash_hex, &entry->id);
+        // convert hex → ObjectID
+        hex_to_hash(hash_hex, &entry->hash);
 
         idx->count++;
     }
@@ -185,42 +184,25 @@ static int cmp_entries(const void *a, const void *b) {
     return strcmp(ea->path, eb->path);
 }
 
-int index_save(Index *idx) {
-    // 1. Sort entries by path
-    qsort(idx->entries, idx->count, sizeof(IndexEntry), cmp_entries);
-
-    // 2. Write to temp file
-    const char *temp_path = ".pes/index.tmp";
-    FILE *f = fopen(temp_path, "w");
+int index_save(const Index *idx) {
+    FILE *f = fopen(".pes/index.tmp", "w");
     if (!f) return -1;
 
-    for (size_t i = 0; i < idx->count; i++) {
-        IndexEntry *e = &idx->entries[i];
+    for (int i = 0; i < idx->count; i++) {
+        const IndexEntry *e = &idx->entries[i];
 
         char hash_hex[HASH_HEX_SIZE + 1];
-        hash_to_hex(&e->id, hash_hex);
+        hash_to_hex(&e->hash, hash_hex);
 
-        fprintf(f, "%o %s %ld %zu %s\n",
+        fprintf(f, "%o %s %u %s\n",
                 e->mode,
                 hash_hex,
-                e->mtime,
                 e->size,
                 e->path);
     }
 
-    fflush(f);
-
-    // 3. fsync file
-    int fd = fileno(f);
-    fsync(fd);
-
     fclose(f);
-
-    // 4. Atomic rename
-    if (rename(temp_path, ".pes/index") != 0) {
-        return -1;
-    }
-
+    rename(".pes/index.tmp", ".pes/index");
     return 0;
 }
 // Stage a file for the next commit.
@@ -233,63 +215,39 @@ int index_save(Index *idx) {
 //
 // Returns 0 on success, -1 on error.
 
-#include <sys/stat.h>
+
 
 int index_add(Index *idx, const char *path) {
     struct stat st;
+    if (stat(path, &st) != 0) return -1;
 
-    // 1. Get file metadata
-    if (stat(path, &st) != 0) {
-        return -1;
-    }
-
-    // 2. Check if entry already exists
-    IndexEntry *entry = index_find(idx, path);
-
-    // Optimization: skip if unchanged
-    if (entry &&
-        entry->mtime == st.st_mtime &&
-        entry->size == st.st_size) {
-        return 0;
-    }
-
-    // 3. Read file content
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
 
     char *data = malloc(st.st_size);
-    if (!data) {
-        fclose(f);
-        return -1;
-    }
-
-    fread(data, 1, st.st_size, f);
+    if (fread(data, 1, st.st_size, f) != st.st_size) {
+    fclose(f);
+    free(data);
+    return -1;
+}
     fclose(f);
 
-    // 4. Write blob
     ObjectID id;
-    if (object_write(OBJ_BLOB, data, st.st_size, &id) != 0) {
-        free(data);
-        return -1;
-    }
-
+    object_write(OBJ_BLOB, data, st.st_size, &id);
     free(data);
 
-    // 5. Create new entry if needed
+    IndexEntry *entry = index_find(idx, path);
     if (!entry) {
         entry = &idx->entries[idx->count++];
     }
 
-    // 6. Store metadata
-    entry->mode = (st.st_mode & 0100) ? 100755 : 100644;
-    entry->mtime = st.st_mtime;
+    entry->mode = 100644;
     entry->size = st.st_size;
 
-    // 7. Store path
     strncpy(entry->path, path, sizeof(entry->path));
 
-    // 8. Store hash
-    memcpy(&entry->id, &id, sizeof(ObjectID));
+    // FIX: copy ObjectID directly
+    memcpy(&entry->hash, &id, sizeof(ObjectID));
 
     return 0;
 }

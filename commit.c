@@ -218,9 +218,29 @@ int commit_create(const char *message) {
         has_parent = 1;
     }
 
-    (void)buffer;
-    (void)commit_id;
-    (void)message;
+    char tree_hex[HASH_HEX_SIZE + 1];
+hash_to_hex(&tree_id, tree_hex);
+
+char parent_hex[HASH_HEX_SIZE + 1];
+if (has_parent) {
+    hash_to_hex(&parent_id, parent_hex);
+}
+
+// Build commit content
+if (has_parent) {
+    snprintf(buffer, sizeof(buffer),
+        "tree %s\nparent %s\nauthor %s\n\n%s\n",
+        tree_hex,
+        parent_hex,
+        pes_author(),
+        message);
+} else {
+    snprintf(buffer, sizeof(buffer),
+        "tree %s\nauthor %s\n\n%s\n",
+        tree_hex,
+        pes_author(),
+        message);
+}
 
     return 0;
 }

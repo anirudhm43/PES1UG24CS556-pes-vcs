@@ -232,9 +232,30 @@ int index_save(Index *idx) {
 //   - index_find                       : checking if the file is already staged
 //
 // Returns 0 on success, -1 on error.
-int index_add(Index *index, const char *path) {
-    // TODO: Implement file staging
-    // (See Lab Appendix for logical steps)
-    (void)index; (void)path;
-    return -1;
+int index_add(Index *idx, const char *path) {
+    struct stat st;
+
+    // 1. Get file metadata
+    if (stat(path, &st) != 0) {
+        return -1;
+    }
+
+    // 2. Check if entry already exists
+    IndexEntry *entry = index_find(idx, path);
+
+    if (!entry) {
+        entry = &idx->entries[idx->count++];
+    }
+
+    // 3. Fill metadata
+    entry->mode = (st.st_mode & 0100) ? 100755 : 100644; // executable or normal
+    entry->mtime = st.st_mtime;
+    entry->size = st.st_size;
+
+    // 4. Store path
+    strncpy(entry->path, path, sizeof(entry->path));
+
+    // NOTE: hash not set yet (next commit)
+
+    return 0;
 }

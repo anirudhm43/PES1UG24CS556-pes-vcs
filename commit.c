@@ -204,43 +204,42 @@ int commit_create(const char *message) {
     Index index;
 
     // Load index
-    if (index_load(&index) != 0) {
-        return -1;
-    }
+    if (index_load(&index) != 0) return -1;
 
     // Build tree
-    if (tree_from_index(&index, &tree_id) != 0) {
-        return -1;
-    }
+    if (tree_from_index(&index, &tree_id) != 0) return -1;
 
-    // Read parent commit from HEAD
+    // Read parent
     if (head_read(&parent_id) == 0) {
         has_parent = 1;
     }
 
     char tree_hex[HASH_HEX_SIZE + 1];
-hash_to_hex(&tree_id, tree_hex);
+    hash_to_hex(&tree_id, tree_hex);
 
-char parent_hex[HASH_HEX_SIZE + 1];
-if (has_parent) {
-    hash_to_hex(&parent_id, parent_hex);
-}
+    char parent_hex[HASH_HEX_SIZE + 1];
+    if (has_parent) {
+        hash_to_hex(&parent_id, parent_hex);
+    }
 
-// Build commit content
-if (has_parent) {
-    snprintf(buffer, sizeof(buffer),
-        "tree %s\nparent %s\nauthor %s\n\n%s\n",
-        tree_hex,
-        parent_hex,
-        pes_author(),
-        message);
-} else {
-    snprintf(buffer, sizeof(buffer),
-        "tree %s\nauthor %s\n\n%s\n",
-        tree_hex,
-        pes_author(),
-        message);
-}
+    // Serialize commit
+    if (has_parent) {
+        snprintf(buffer, sizeof(buffer),
+            "tree %s\nparent %s\nauthor %s\n\n%s\n",
+            tree_hex, parent_hex, pes_author(), message);
+    } else {
+        snprintf(buffer, sizeof(buffer),
+            "tree %s\nauthor %s\n\n%s\n",
+            tree_hex, pes_author(), message);
+    }
+
+    // Write commit
+    if (object_write(OBJ_COMMIT, buffer, strlen(buffer), &commit_id) != 0)
+        return -1;
+
+    // Update HEAD
+    if (head_update(&commit_id) != 0)
+        return -1;
 
     return 0;
 }

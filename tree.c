@@ -129,23 +129,28 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
-int tree_from_index(Index *idx, ObjectID *tree_id) {
-    if (!idx || idx->count == 0) {
-        return -1;
-    }
+int tree_from_index(Index *idx, ObjectID *out_tree) {
+    // Temporary tree (flat for now)
+    Tree tree;
+    tree.count = 0;
 
-    // Placeholder for tree entries (will build later)
     for (size_t i = 0; i < idx->count; i++) {
-        IndexEntry *entry = &idx->entries[i];
+        IndexEntry *ie = &idx->entries[i];
 
-        // For now, just access fields (no processing yet)
-        (void)entry->mode;
-        (void)entry->hash;
-        (void)entry->path;
+        TreeEntry *te = &tree.entries[tree.count++];
+
+        // Copy mode
+        te->mode = ie->mode;
+
+        // Copy object hash
+        memcpy(&te->id, &ie->id, sizeof(ObjectID));
+
+        // Copy file name (IMPORTANT: just name for now)
+        strncpy(te->name, ie->path, sizeof(te->name));
     }
 
-    // Tree creation not implemented yet
-    (void)tree_id;
+    // Not writing tree yet
+    (void)out_tree;
 
     return 0;
 }

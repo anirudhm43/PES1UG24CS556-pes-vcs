@@ -117,13 +117,59 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     // Step 4: Compute SHA-256 hash
     compute_hash(buffer, total_size, id_out);
 
-    //Step 5: Deduplication check
+    // Step 5: Deduplication
     if (object_exists(id_out)) {
         free(buffer);
-        return 0;   // already stored, skip writing
+        return 0;
     }
 
-    // Writing not implemented yet (next commit)
+    // Step 6: Get final object path
+    char path[512];
+    object_path(id_out, path, sizeof(path));
+
+    // Extract directory path (.pes/objects/XX)
+    char dir[512];
+    strncpy(dir, path, sizeof(dir));
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';
+        mkdir(dir, 0755);   // create shard directory
+    }
+
+    // Step 7: Create temp file path
+    char temp_path[512];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+
+    // Step 8: Write to temp file
+    int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        free(buffer);
+        return -1;
+    }
+
+    if (write(fd, buffer, total_size) != (ssize_t)total_size) {
+        close(fd);
+        free(buffer);
+        return -1;
+    }
+
+    // Step 9: fsync temp file
+    fsync(fd);
+    close(fd);
+
+    // Step 10: Atomic rename
+    if (rename(temp_path, path) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    // Step 11: fsync directory (persist rename)
+    int dir_fd = open(dir, O_DIRECTORY);
+    if (dir_fd >= 0) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
+
     free(buffer);
     return 0;
 }

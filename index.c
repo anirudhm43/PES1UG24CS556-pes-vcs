@@ -233,6 +233,8 @@ int index_save(Index *idx) {
 //
 // Returns 0 on success, -1 on error.
 
+#include <sys/stat.h>
+
 int index_add(Index *idx, const char *path) {
     struct stat st;
 
@@ -241,7 +243,17 @@ int index_add(Index *idx, const char *path) {
         return -1;
     }
 
-    // 2. Read file content
+    // 2. Check if entry already exists
+    IndexEntry *entry = index_find(idx, path);
+
+    // Optimization: skip if unchanged
+    if (entry &&
+        entry->mtime == st.st_mtime &&
+        entry->size == st.st_size) {
+        return 0;
+    }
+
+    // 3. Read file content
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
 
@@ -254,7 +266,7 @@ int index_add(Index *idx, const char *path) {
     fread(data, 1, st.st_size, f);
     fclose(f);
 
-    // 3. Write blob to object store
+    // 4. Write blob
     ObjectID id;
     if (object_write(OBJ_BLOB, data, st.st_size, &id) != 0) {
         free(data);
@@ -263,21 +275,20 @@ int index_add(Index *idx, const char *path) {
 
     free(data);
 
-    // 4. Find or create index entry
-    IndexEntry *entry = index_find(idx, path);
+    // 5. Create new entry if needed
     if (!entry) {
         entry = &idx->entries[idx->count++];
     }
 
-    // 5. Fill metadata
+    // 6. Store metadata
     entry->mode = (st.st_mode & 0100) ? 100755 : 100644;
     entry->mtime = st.st_mtime;
     entry->size = st.st_size;
 
-    // 6. Store path
+    // 7. Store path
     strncpy(entry->path, path, sizeof(entry->path));
 
-    // 7. Store object hash
+    // 8. Store hash
     memcpy(&entry->id, &id, sizeof(ObjectID));
 
     return 0;

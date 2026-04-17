@@ -213,8 +213,11 @@ int commit_create(const char *message) {
         return -1;
     }
 
-    (void)parent_id;
-    (void)has_parent;
+    // Read parent commit from HEAD
+    if (head_read(&parent_id) == 0) {
+        has_parent = 1;
+    }
+
     (void)buffer;
     (void)commit_id;
     (void)message;

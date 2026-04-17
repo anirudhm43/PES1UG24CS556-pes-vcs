@@ -106,14 +106,22 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
-    // (Commit 1 stops here — no hashing, no writing yet)
-    (void)data;
-    (void)id_out;
-    (void)header_len;
+    // Step 3: Combine header + data
+    size_t total_size = header_len + len;
+    char *buffer = malloc(total_size);
+    if (!buffer) return -1;
+
+    memcpy(buffer, header, header_len);
+    memcpy(buffer + header_len, data, len);
+
+    // Step 4: Compute SHA-256 hash of full object
+    compute_hash(buffer, total_size, id_out);
+
+    // Cleanup (writing not implemented yet)
+    free(buffer);
 
     return 0;
 }
-
 // Read an object from the store.
 //
 // Steps:

@@ -232,6 +232,7 @@ int index_save(Index *idx) {
 //   - index_find                       : checking if the file is already staged
 //
 // Returns 0 on success, -1 on error.
+
 int index_add(Index *idx, const char *path) {
     struct stat st;
 
@@ -240,22 +241,44 @@ int index_add(Index *idx, const char *path) {
         return -1;
     }
 
-    // 2. Check if entry already exists
-    IndexEntry *entry = index_find(idx, path);
+    // 2. Read file content
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
 
+    char *data = malloc(st.st_size);
+    if (!data) {
+        fclose(f);
+        return -1;
+    }
+
+    fread(data, 1, st.st_size, f);
+    fclose(f);
+
+    // 3. Write blob to object store
+    ObjectID id;
+    if (object_write(OBJ_BLOB, data, st.st_size, &id) != 0) {
+        free(data);
+        return -1;
+    }
+
+    free(data);
+
+    // 4. Find or create index entry
+    IndexEntry *entry = index_find(idx, path);
     if (!entry) {
         entry = &idx->entries[idx->count++];
     }
 
-    // 3. Fill metadata
-    entry->mode = (st.st_mode & 0100) ? 100755 : 100644; // executable or normal
+    // 5. Fill metadata
+    entry->mode = (st.st_mode & 0100) ? 100755 : 100644;
     entry->mtime = st.st_mtime;
     entry->size = st.st_size;
 
-    // 4. Store path
+    // 6. Store path
     strncpy(entry->path, path, sizeof(entry->path));
 
-    // NOTE: hash not set yet (next commit)
+    // 7. Store object hash
+    memcpy(&entry->id, &id, sizeof(ObjectID));
 
     return 0;
 }

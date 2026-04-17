@@ -130,27 +130,47 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 int tree_from_index(Index *idx, ObjectID *out_tree) {
-    // Temporary tree (flat for now)
-    Tree tree;
-    tree.count = 0;
+    // Step 1: Create temporary tree entries
+    TreeEntry entries[1024];
+    size_t count = 0;
 
     for (size_t i = 0; i < idx->count; i++) {
         IndexEntry *ie = &idx->entries[i];
 
-        TreeEntry *te = &tree.entries[tree.count++];
+        TreeEntry *te = &entries[count++];
 
-        // Copy mode
         te->mode = ie->mode;
-
-        // Copy object hash
         memcpy(&te->id, &ie->id, sizeof(ObjectID));
-
-        // Copy file name (IMPORTANT: just name for now)
         strncpy(te->name, ie->path, sizeof(te->name));
+        te->name[sizeof(te->name) - 1] = '\0';
     }
 
-    // Not writing tree yet
-    (void)out_tree;
+    // Step 2: Calculate total buffer size
+    size_t total_size = 0;
+    for (size_t i = 0; i < count; i++) {
+        total_size += snprintf(NULL, 0, "%o %s", entries[i].mode, entries[i].name) + 1;
+        total_size += HASH_SIZE;
+    }
 
+    char *buffer = malloc(total_size);
+    if (!buffer) return -1;
+
+    // Step 3: Serialize
+    char *ptr = buffer;
+
+    for (size_t i = 0; i < count; i++) {
+        int len = sprintf(ptr, "%o %s", entries[i].mode, entries[i].name);
+        ptr += len;
+
+        *ptr++ = '\0';
+
+        memcpy(ptr, entries[i].id.hash, HASH_SIZE);
+        ptr += HASH_SIZE;
+    }
+
+    // (Commit 3 stops here — no object_write yet)
+    free(buffer);
+
+    (void)out_tree;
     return 0;
 }

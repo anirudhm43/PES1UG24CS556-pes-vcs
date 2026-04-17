@@ -130,42 +130,49 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 int tree_from_index(Index *idx, ObjectID *out_tree) {
-    // Root entries
-    TreeEntry root_entries[1024];
-    size_t root_count = 0;
-
-    // Subtree storage (simple: one level)
-    TreeEntry sub_entries[1024];
-    size_t sub_count = 0;
-    char current_dir[256] = "";
+    TreeEntry entries[1024];
+    size_t count = 0;
 
     for (size_t i = 0; i < idx->count; i++) {
         IndexEntry *ie = &idx->entries[i];
 
-        char *slash = strchr(ie->path, '/');
+        TreeEntry *te = &entries[count++];
 
-        if (!slash) {
-            // File in root
-            TreeEntry *te = &root_entries[root_count++];
-            te->mode = ie->mode;
-            memcpy(&te->id, &ie->id, sizeof(ObjectID));
-            strncpy(te->name, ie->path, sizeof(te->name));
-        } else {
-            // File inside directory
-            size_t dir_len = slash - ie->path;
+        te->mode = ie->mode;
+        memcpy(&te->id, &ie->id, sizeof(ObjectID));
 
-            strncpy(current_dir, ie->path, dir_len);
-            current_dir[dir_len] = '\0';
-
-            TreeEntry *te = &sub_entries[sub_count++];
-            te->mode = ie->mode;
-            memcpy(&te->id, &ie->id, sizeof(ObjectID));
-            strncpy(te->name, slash + 1, sizeof(te->name));
-        }
+        // Only filename (strip directory)
+        char *slash = strrchr(ie->path, '/');
+        if (slash) strcpy(te->name, slash + 1);
+        else strcpy(te->name, ie->path);
     }
 
-    // NOTE: Actual subtree object writing comes in next commit
+    // Calculate size
+    size_t total_size = 0;
+    for (size_t i = 0; i < count; i++) {
+        total_size += snprintf(NULL, 0, "%o %s", entries[i].mode, entries[i].name) + 1;
+        total_size += HASH_SIZE;
+    }
 
-    (void)out_tree;
-    return 0;
+    char *buffer = malloc(total_size);
+    if (!buffer) return -1;
+
+    char *ptr = buffer;
+
+    // Serialize
+    for (size_t i = 0; i < count; i++) {
+        int len = sprintf(ptr, "%o %s", entries[i].mode, entries[i].name);
+        ptr += len;
+
+        *ptr++ = '\0';
+
+        memcpy(ptr, entries[i].id.hash, HASH_SIZE);
+        ptr += HASH_SIZE;
+    }
+
+    // FINAL STEP
+    int res = object_write(OBJ_TREE, buffer, total_size, out_tree);
+
+    free(buffer);
+    return res;
 }

@@ -130,46 +130,41 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 int tree_from_index(Index *idx, ObjectID *out_tree) {
-    // Step 1: Create temporary tree entries
-    TreeEntry entries[1024];
-    size_t count = 0;
+    // Root entries
+    TreeEntry root_entries[1024];
+    size_t root_count = 0;
+
+    // Subtree storage (simple: one level)
+    TreeEntry sub_entries[1024];
+    size_t sub_count = 0;
+    char current_dir[256] = "";
 
     for (size_t i = 0; i < idx->count; i++) {
         IndexEntry *ie = &idx->entries[i];
 
-        TreeEntry *te = &entries[count++];
+        char *slash = strchr(ie->path, '/');
 
-        te->mode = ie->mode;
-        memcpy(&te->id, &ie->id, sizeof(ObjectID));
-        strncpy(te->name, ie->path, sizeof(te->name));
-        te->name[sizeof(te->name) - 1] = '\0';
+        if (!slash) {
+            // File in root
+            TreeEntry *te = &root_entries[root_count++];
+            te->mode = ie->mode;
+            memcpy(&te->id, &ie->id, sizeof(ObjectID));
+            strncpy(te->name, ie->path, sizeof(te->name));
+        } else {
+            // File inside directory
+            size_t dir_len = slash - ie->path;
+
+            strncpy(current_dir, ie->path, dir_len);
+            current_dir[dir_len] = '\0';
+
+            TreeEntry *te = &sub_entries[sub_count++];
+            te->mode = ie->mode;
+            memcpy(&te->id, &ie->id, sizeof(ObjectID));
+            strncpy(te->name, slash + 1, sizeof(te->name));
+        }
     }
 
-    // Step 2: Calculate total buffer size
-    size_t total_size = 0;
-    for (size_t i = 0; i < count; i++) {
-        total_size += snprintf(NULL, 0, "%o %s", entries[i].mode, entries[i].name) + 1;
-        total_size += HASH_SIZE;
-    }
-
-    char *buffer = malloc(total_size);
-    if (!buffer) return -1;
-
-    // Step 3: Serialize
-    char *ptr = buffer;
-
-    for (size_t i = 0; i < count; i++) {
-        int len = sprintf(ptr, "%o %s", entries[i].mode, entries[i].name);
-        ptr += len;
-
-        *ptr++ = '\0';
-
-        memcpy(ptr, entries[i].id.hash, HASH_SIZE);
-        ptr += HASH_SIZE;
-    }
-
-    // (Commit 3 stops here — no object_write yet)
-    free(buffer);
+    // NOTE: Actual subtree object writing comes in next commit
 
     (void)out_tree;
     return 0;

@@ -194,21 +194,25 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message) {
-    // Step 1: Placeholder for tree hash
     ObjectID tree_id;
-
-    // Step 2: Placeholder for parent commit
     ObjectID parent_id;
     int has_parent = 0;
 
-    // Step 3: Placeholder for commit content buffer
     char buffer[1024];
-
-    // Step 4: Placeholder for final commit hash
     ObjectID commit_id;
 
-    // (No logic yet — will be added in next commits)
-    (void)tree_id;
+    Index index;
+
+    // Load index
+    if (index_load(&index) != 0) {
+        return -1;
+    }
+
+    // Build tree
+    if (tree_from_index(&index, &tree_id) != 0) {
+        return -1;
+    }
+
     (void)parent_id;
     (void)has_parent;
     (void)buffer;

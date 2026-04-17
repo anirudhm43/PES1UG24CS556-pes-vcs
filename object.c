@@ -114,12 +114,17 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(buffer, header, header_len);
     memcpy(buffer + header_len, data, len);
 
-    // Step 4: Compute SHA-256 hash of full object
+    // Step 4: Compute SHA-256 hash
     compute_hash(buffer, total_size, id_out);
 
-    // Cleanup (writing not implemented yet)
-    free(buffer);
+    //Step 5: Deduplication check
+    if (object_exists(id_out)) {
+        free(buffer);
+        return 0;   // already stored, skip writing
+    }
 
+    // Writing not implemented yet (next commit)
+    free(buffer);
     return 0;
 }
 // Read an object from the store.

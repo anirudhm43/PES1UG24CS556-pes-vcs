@@ -196,7 +196,83 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+    char path[512];
+    object_path(id, path, sizeof(path));
+
+    // Step 1: Open file
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    // Step 2: Read entire file
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    rewind(f);
+
+    char *buffer = malloc(size);
+    if (!buffer) {
+        fclose(f);
+        return -1;
+    }
+
+    if (fread(buffer, 1, size, f) != size) {
+        fclose(f);
+        free(buffer);
+        return -1;
+    }
+    fclose(f);
+
+    // Step 3: Verify integrity (recompute hash)
+    ObjectID computed;
+    compute_hash(buffer, size, &computed);
+
+    if (memcmp(computed.hash, id->hash, HASH_SIZE) != 0) {
+        free(buffer);
+        return -1;  // corruption detected
+    }
+
+    // Step 4: Parse header (find '\0')
+    char *null_pos = memchr(buffer, '\0', size);
+    if (!null_pos) {
+        free(buffer);
+        return -1;
+    }
+
+    size_t header_len = null_pos - buffer;
+
+    char header[64];
+    memcpy(header, buffer, header_len);
+    header[header_len] = '\0';
+
+    // Step 5: Extract type and size
+    char type_str[10];
+    size_t data_size;
+
+    if (sscanf(header, "%s %zu", type_str, &data_size) != 2) {
+        free(buffer);
+        return -1;
+    }
+
+    // Step 6: Convert type string → enum
+    if (strcmp(type_str, "blob") == 0) *type_out = OBJ_BLOB;
+    else if (strcmp(type_str, "tree") == 0) *type_out = OBJ_TREE;
+    else if (strcmp(type_str, "commit") == 0) *type_out = OBJ_COMMIT;
+    else {
+        free(buffer);
+        return -1;
+    }
+
+    // Step 7: Extract data
+    char *data_start = null_pos + 1;
+
+    *data_out = malloc(data_size);
+    if (!*data_out) {
+        free(buffer);
+        return -1;
+    }
+
+    memcpy(*data_out, data_start, data_size);
+    *len_out = data_size;
+
+    free(buffer);
+    return 0;
 }
